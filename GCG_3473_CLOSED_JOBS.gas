@@ -1,0 +1,122 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Variable.Global.sJob.Declare(String)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+'quote 4349
+'ERM
+'notify user the job,suffix, seq of open job (and children) before user can WIP to FG (BOM)
+'SFC > TRANS > WIP TO FG (BOM)
+'Use CORE program JB0551GI w/ date >= 4/25/2013
+
+V.Local.sError.Declare(String)
+
+F.ODBC.Connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+F.Intrinsic.Control.If(V.Caller.Hook,=,27806)
+	V.Global.sJob.Set(V.Passed.000001)
+	F.Intrinsic.String.LPad(V.Global.sJob,6,0,V.Global.sJob)
+	F.Intrinsic.Control.CallSub(Ops)
+F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.CallSub(Unload)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_CLOSED_JOBS.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.ODBC.Connection!con.Close
+F.Intrinsic.Control.End
+
+Program.Sub.Unload.End
+
+Program.Sub.Ops.Start
+F.Intrinsic.Control.SetErrorHandler("Ops_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+V.Local.sSQL.Declare(String)
+V.Local.sNotes.Declare(String)
+V.Local.sTemp.Declare(String)
+V.Local.sFQP.Declare(String)
+V.Local.bDeleteFile.Declare(Boolean,False)
+'V.Local.bCheck.Declare(Boolean,False)
+V.Local.sNotes.Set("")
+
+'Check for LMO = O
+F.Intrinsic.String.Build("Select * From V_Job_Operations_WC Where JOB = '{0}' and LMO = '{1}' and SEQ not like '{2}' and FLAG_CLOSED <> '{3}'",V.Global.sJob,"O","99%","Y",V.Local.sSQL)
+F.ODBC.Connection!con.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+F.Intrinsic.Control.If(V.ODBC.con!rst.EOF,=,False)
+	'V.Local.bCheck.Set(True)
+	F.Intrinsic.Control.DoUntil(V.ODBC.con!rst.EOF,=,True)
+		F.Intrinsic.String.Build("JOB: '{0}' SUFFIX: '{1}' SEQ: '{2}' LMO: '{3}'",V.Global.sJob,V.ODBC.con!rst.FieldValTrim!SUFFIX,V.ODBC.con!rst.FieldValTrim!SEQ,"O",V.Local.sTemp)
+		F.Intrinsic.Control.If(V.Local.sNotes,=,"")
+			F.Intrinsic.String.Concat(V.Local.sNotes,V.Local.sTemp,V.Local.sNotes)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Concat(V.Local.sNotes,V.Ambient.NewLine,V.Local.sTemp,V.Local.sNotes)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rst.MoveNext
+	F.Intrinsic.Control.Loop
+F.Intrinsic.Control.EndIf
+F.ODBC.con!rst.Close
+
+'Check for Final inspections
+'F.Intrinsic.String.Build("Select * From V_Job_Operations_WC Where JOB = '{0}' and LMO = '{1}' and SEQ not like '{2}' and FLAG_CLOSED <> '{3}'",V.Global.sJob,"F","99%","Y",V.Local.sSQL)
+F.Intrinsic.String.Build("Select * From V_Job_Operations_WC Where JOB = '{0}' and WORKCENTER = '{1}' and OPERATION = '{2}' and FLAG_CLOSED <> '{3}'",V.Global.sJob,"INSP","FINAL","Y",V.Local.sSQL)
+F.ODBC.Connection!con.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+F.Intrinsic.Control.If(V.ODBC.con!rst.EOF,=,False)
+	'V.Local.bCheck.Set(True)
+	F.Intrinsic.Control.DoUntil(V.ODBC.con!rst.EOF,=,True)
+		F.Intrinsic.String.Build("JOB: '{0}' SUFFIX: '{1}' SEQ: '{2}' LMO: '{3}'",V.Global.sJob,V.ODBC.con!rst.FieldValTrim!SUFFIX,V.ODBC.con!rst.FieldValTrim!SEQ,"F",V.Local.sTemp)
+		F.Intrinsic.Control.If(V.Local.sNotes,=,"")
+			F.Intrinsic.String.Concat(V.Local.sNotes,V.Local.sTemp,V.Local.sNotes)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Concat(V.Local.sNotes,V.Ambient.NewLine,V.Local.sTemp,V.Local.sNotes)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rst.MoveNext
+	F.Intrinsic.Control.Loop
+F.Intrinsic.Control.EndIf
+F.ODBC.con!rst.Close
+
+'if open jobs are found, override WIP to FG, display jobs so user can close them.
+F.Intrinsic.Control.If(V.Local.sNotes,<>,"")
+	V.Passed.777777.Set(1)
+	F.Intrinsic.String.Concat(V.Caller.FilesDir,"\WIPtoFG.txt",V.Local.sFQP)
+	F.Intrinsic.File.Exists(V.Local.sFQP,V.Local.bDeleteFile)
+	F.Intrinsic.Control.If(V.Local.bDeleteFile,=,True)
+		F.Intrinsic.File.DeleteFile(V.Local.sFQP)
+	F.Intrinsic.Control.EndIf
+	F.Intrinsic.File.String2File(V.Local.sFQP,V.Local.sNotes)
+	F.Intrinsic.Task.ShellExec(V.Caller.Handle,"",V.Local.sFQP,"","",0)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Ops_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_CLOSED_JOBS.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Ops.End
+
+Program.Sub.Comments.Start
+${$0$}$GCG_CLOSED_JOBS$}$ERIC$}$4/25/2013
+Program.Sub.Comments.End
+
